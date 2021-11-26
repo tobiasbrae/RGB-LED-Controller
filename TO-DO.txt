@@ -1,1 +1,1 @@
--Add saving/loading functionality to keep the state on power loss
+All targets archieved
