@@ -65,14 +65,15 @@
 #define UART_RX_SIZE 100
 #define UART_TX_SIZE 100
 
-#define CYCLE 2000
+#define NUM_PARAM 6
+#define PARAM_CHECK_EEPROM 0
+#define PARAM_RED 1
+#define PARAM_GREEN 2
+#define PARAM_BLUE 3
+#define PARAM_POWER 4
+#define PARAM_AUTO 5
 
-#define NUM_PARAM 5
-#define PARAM_RED 0
-#define PARAM_GREEN 1
-#define PARAM_BLUE 2
-#define PARAM_POWER 3
-#define PARAM_AUTO 4
+#define CHECK_EEPROM 0xAA
 
 // ==================================== [variables] ==========================================
 
@@ -84,15 +85,14 @@ volatile uint8_t isSending; // states if the transmitter is currently busy
 uint8_t params[NUM_PARAM]; // stores all parameters
 
 volatile uint16_t clock; // base clock [ms]
-uint16_t cycleValue;
-volatile uint8_t mode; // current color mode
 volatile uint8_t pwmCycle; // used to track the pwm cycle
 
 // ==================================== [function declaration] ==========================================
 
 void initialize(void); // setting the timers, uart, etc.
 void handleData(void); // check input buffer for possible commands
-
+void loadParams(void); // load parameters from eeprom
+void storeParams(void); // store parameters to eeprom
 void sendChar(char data); // send a char via UART
 void sendString(char *data); // send a string via UART
 
@@ -101,16 +101,11 @@ void sendString(char *data); // send a string via UART
 int main(void)
 {
 	initialize();
-
-	cycleValue = CYCLE;
+	loadParams();	
 
 	while(1)
 	{
-		if(clock > cycleValue)
-		{
-			clock = 0;
-			handleData();
-		}
+		handleData();
 	}
 }
 
@@ -160,41 +155,6 @@ void initialize(void)
 	cb_initBuffer(&txBuf, txData, UART_TX_SIZE);
 
 	sei(); // enable global interrupts
-}
-
-void switchMode(void)
-{
-	setBit(OUT_RED, 0); // switch red pin off
-	setBit(OUT_GREEN, 0); // switch green pin off
-	setBit(OUT_BLUE, 0); // switch blue pin off
-
-	mode = (mode+1)%6;
-	switch(mode)
-	{
-		case 0:
-			setBit(OUT_RED, 1); // switch red pin on
-			break;
-		case 1:
-			setBit(OUT_RED, 1); // switch red pin on
-			setBit(OUT_GREEN, 1); // switch red pin on
-			break;
-		case 2:
-			setBit(OUT_GREEN, 1); // switch green pin on
-			break;
-		case 3:
-			setBit(OUT_GREEN, 1); // switch red pin on
-			setBit(OUT_BLUE, 1); // switch blue pin on
-			break;
-		case 4:
-			setBit(OUT_BLUE, 1); // switch green pin on
-			break;
-		case 5:
-			setBit(OUT_BLUE, 1); // switch red pin on
-			setBit(OUT_RED, 1); // switch blue pin on
-			break;
-		default:
-			break;
-	}
 }
 
 void handleData(void)
@@ -289,7 +249,15 @@ void handleData(void)
 		}
 		else if(cb_getNext(&rxBuf) == 's')
 		{
-			sendString("save\r\n");
+			if(length == 3 && cb_getNextOff(&rxBuf, 1) == 'y')
+			{
+				storeParams();
+				sendString("Parameters stored.\r\n");
+			}
+			else
+			{
+				sendString("Error. Usage: \"sy\"\r\n");
+			}
 		}
 		else
 		{
@@ -297,6 +265,49 @@ void handleData(void)
 		}
 		cb_deleteN(&rxBuf, length);
 	}
+}
+
+void loadParams(void)
+{
+	uint8_t abort = 0; // states if the load operation was aborted
+	cli();
+	for(uint8_t i = 0; i < NUM_PARAM; i++)
+	{
+		while(EECR & (1 << EEWE)); // wait for write to finish
+		EEARH = 0;
+		EEARL = i;
+		EECR |= 1 << EERE;
+		params[i] = EEDR;
+		if(i == PARAM_CHECK_EEPROM && params[i] != CHECK_EEPROM)
+		{
+			abort = 1;
+			break;
+		}
+	}
+	if(!abort)
+	{
+		if(params[PARAM_AUTO])
+			params[PARAM_POWER] = 1;
+		else
+			params[PARAM_POWER] = 0;
+	}
+	sei();
+}
+
+void storeParams(void)
+{
+	cli();
+	params[PARAM_CHECK_EEPROM] = CHECK_EEPROM; // store the eeprom check value in the parameters
+	for(uint8_t i = 0; i < NUM_PARAM; i++) // loop through all parameters
+	{
+		while(EECR & (1 << EEWE)); // wait for previous write to finish
+		EEARH = 0;
+		EEARL = i; // write address
+		EEDR = params[i]; // write parameter
+		EECR = 1 << EEMWE; // set master write enable bit
+		EECR |= 1 << EEWE; // set write enable bit
+	}
+	sei();
 }
 
 void sendChar(char data)
