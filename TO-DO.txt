@@ -1,5 +1,5 @@
--Add general UART functionality
 -Design a command interface (at least red/green/blue value and on/off)
--Propably add a buffer for queueing serial data
 -Implement PWM functionality with 3 channels
 -Add saving/loading functionality to keep the state on power loss
+-Support for toggle on/off switch
+-Option to change the brightness

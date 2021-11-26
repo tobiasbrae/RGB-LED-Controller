@@ -11,7 +11,7 @@ AVR_DUDE_CONF="C:\Programs\Arduino\hardware\tools\avr\etc\avrdude.conf"
 
 PROGDEVICE=COM3
 
-OBJ=main.o bitOperation.o
+OBJ=main.o bitOperation.o charBuffer.o
 
 CFLAGS=-mmcu=${MCU} ${OPTIMAZATION_FLAGS} -DF_CPU=${CPU_FREQ} -std=c99 -Wall
 LDFLAGS=-Wall
