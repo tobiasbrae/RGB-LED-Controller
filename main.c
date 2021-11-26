@@ -45,13 +45,20 @@
 // PORTD6 (AIN0)		- PWM output blue
 // PORTD7 (AIN1)		- Unused
 
-#define DDR_PWM_R &DDRD,5
-#define DDR_PWM_G &DDRD,6
-#define DDR_PWM_B &DDRD,7
+#define DDR_RED &DDRD,5
+#define DDR_GREEN &DDRD,6
+#define DDR_BLUE &DDRD,7
 
-#define PWM_R &PORTD,5
-#define PWM_G &PORTD,6
-#define PWM_B &PORTD,7
+#define OUT_RED &PORTD,5
+#define OUT_GREEN &PORTD,6
+#define OUT_BLUE &PORTD,7
+
+#define RED_ON PORTD|=1<<5
+#define RED_OFF PORTD&=~(1<<5)
+#define GREEN_ON PORTD|=1<<6
+#define GREEN_OFF PORTD&=~(1<<6)
+#define BLUE_ON PORTD|=1<<7
+#define BLUE_OFF PORTD&=~(1<<7)
 
 // ==================================== [defines] ==========================================
 
@@ -60,6 +67,13 @@
 
 #define CYCLE 2000
 
+#define NUM_PARAM 5
+#define PARAM_RED 0
+#define PARAM_GREEN 1
+#define PARAM_BLUE 2
+#define PARAM_POWER 3
+#define PARAM_AUTO 4
+
 // ==================================== [variables] ==========================================
 
 cb_charBuffer rxBuf, txBuf; // structures for the UART buffers
@@ -67,18 +81,20 @@ char rxData[UART_RX_SIZE]; // data for UART rx buffer
 char txData[UART_TX_SIZE]; // data for UART tx buffer
 volatile uint8_t isSending; // states if the transmitter is currently busy
 
+uint8_t params[NUM_PARAM]; // stores all parameters
+
 volatile uint16_t clock; // base clock [ms]
 uint16_t cycleValue;
 volatile uint8_t mode; // current color mode
+volatile uint8_t pwmCycle; // used to track the pwm cycle
 
 // ==================================== [function declaration] ==========================================
 
 void initialize(void); // setting the timers, uart, etc.
-void switchMode(void); // switch the color mode
+void handleData(void); // check input buffer for possible commands
 
 void sendChar(char data); // send a char via UART
 void sendString(char *data); // send a string via UART
-void handleData(void); // check input buffer for possible commands
 
 // ==================================== [program start] ==========================================
 
@@ -93,7 +109,6 @@ int main(void)
 		if(clock > cycleValue)
 		{
 			clock = 0;
-			switchMode();
 			handleData();
 		}
 	}
@@ -104,15 +119,15 @@ void initialize(void)
 	cli(); // disable global interrupts
 
 	// PWM output configuration
-	setBit(DDR_PWM_R, 1); // set red pin as output
-	setBit(DDR_PWM_G, 1); // set green pin as output
-	setBit(DDR_PWM_B, 1); // set blue pin as output
-	setBit(PWM_R, 0); // switch red pin off
-	setBit(PWM_G, 0); // switch green pin off
-	setBit(PWM_B, 0); // switch blue pin off
+	setBit(DDR_RED, 1); // set red pin as output
+	setBit(DDR_GREEN, 1); // set green pin as output
+	setBit(DDR_BLUE, 1); // set blue pin as output
+	setBit(OUT_RED, 0); // switch red pin off
+	setBit(OUT_GREEN, 0); // switch green pin off
+	setBit(OUT_BLUE, 0); // switch blue pin off
 
 	// pwm timer setup
-	OCR1A = 50; // pwm interrupt frequency 20 kHz
+	OCR1A = 25; // pwm interrupt frequency 20 kHz
 	setBit(&TCCR1B, WGM13, 0); // ctc mode
 	setBit(&TCCR1B, WGM12, 1);
 	setBit(&TCCR1A, WGM11, 0);
@@ -120,7 +135,7 @@ void initialize(void)
 	setBit(&TCCR1B, CS12, 0); // divider 8 -> 1 MHz
 	setBit(&TCCR1B, CS11, 1);
 	setBit(&TCCR1B, CS10, 0);
-	//setBit(&TIMSK, OCIE1A, 1); // enable output compare match interrupt
+	setBit(&TIMSK, OCIE1A, 1); // enable output compare match interrupt
 
 	// clock timer setup
 	OCR2 = 32; // clock frequency 0.977 kHz -> clock tick 1.024 ms 
@@ -149,33 +164,33 @@ void initialize(void)
 
 void switchMode(void)
 {
-	setBit(PWM_R, 0); // switch red pin off
-	setBit(PWM_G, 0); // switch green pin off
-	setBit(PWM_B, 0); // switch blue pin off
+	setBit(OUT_RED, 0); // switch red pin off
+	setBit(OUT_GREEN, 0); // switch green pin off
+	setBit(OUT_BLUE, 0); // switch blue pin off
 
 	mode = (mode+1)%6;
 	switch(mode)
 	{
 		case 0:
-			setBit(PWM_R, 1); // switch red pin on
+			setBit(OUT_RED, 1); // switch red pin on
 			break;
 		case 1:
-			setBit(PWM_R, 1); // switch red pin on
-			setBit(PWM_G, 1); // switch red pin on
+			setBit(OUT_RED, 1); // switch red pin on
+			setBit(OUT_GREEN, 1); // switch red pin on
 			break;
 		case 2:
-			setBit(PWM_G, 1); // switch green pin on
+			setBit(OUT_GREEN, 1); // switch green pin on
 			break;
 		case 3:
-			setBit(PWM_G, 1); // switch red pin on
-			setBit(PWM_B, 1); // switch blue pin on
+			setBit(OUT_GREEN, 1); // switch red pin on
+			setBit(OUT_BLUE, 1); // switch blue pin on
 			break;
 		case 4:
-			setBit(PWM_B, 1); // switch green pin on
+			setBit(OUT_BLUE, 1); // switch green pin on
 			break;
 		case 5:
-			setBit(PWM_B, 1); // switch red pin on
-			setBit(PWM_R, 1); // switch blue pin on
+			setBit(OUT_BLUE, 1); // switch red pin on
+			setBit(OUT_RED, 1); // switch blue pin on
 			break;
 		default:
 			break;
@@ -200,29 +215,77 @@ void handleData(void)
 		if(cb_getNext(&rxBuf) == 'r')
 		{
 			uint16_t value;
-			if(sscanf(buffer, "r%u\r",&value) == 1)
+			if(sscanf(buffer, "r%u\r",&value) == 1 && value <= 255)
 			{
-				cycleValue = value;
-				sendString("erfolgreich\r\n");
+				params[PARAM_RED] = (uint8_t) value;
+				sendString("Static value red changed successfully.\r\n");
 			}
 			else
-				sendString("fehler\r\n");
+				sendString("Error. Usage: \"r<0...255>\"\r\n");
 		}
 		else if(cb_getNext(&rxBuf) == 'g')
 		{
-			sendString("gruen\r\n");
+			uint16_t value;
+			if(sscanf(buffer, "g%u\r",&value) == 1 && value <= 255)
+			{
+				params[PARAM_GREEN] = (uint8_t) value;
+				sendString("Static value green changed successfully.\r\n");
+			}
+			else
+				sendString("Error. Usage: \"g<0...255>\"\r\n");
 		}
 		else if(cb_getNext(&rxBuf) == 'b')
 		{
-			sendString("blau\r\n");
+			uint16_t value;
+			if(sscanf(buffer, "b%u\r",&value) == 1 && value <= 255)
+			{
+				params[PARAM_BLUE] = (uint8_t) value;
+				sendString("Static value blue changed successfully.\r\n");
+			}
+			else
+				sendString("Error. Usage: \"b<0...255>\"\r\n");
 		}
 		else if(cb_getNext(&rxBuf) == 'p')
 		{
-			sendString("power\r\n");
+			char value = cb_getNextOff(&rxBuf, 1);
+			if(length == 3 && (value == '1' || value == '0'))
+			{
+				if(value == '1')
+				{
+					params[PARAM_POWER] = 1;
+					sendString("Power enabled.\r\n");
+				}
+				else
+				{
+					params[PARAM_POWER] = 0;
+					sendString("Power disabled.\r\n");
+				}
+			}
+			else
+			{
+				sendString("Error. Usage: \"p<1/0>\"\r\n");
+			}
 		}
 		else if(cb_getNext(&rxBuf) == 'a')
 		{
-			sendString("auto-on\r\n");
+			char value = cb_getNextOff(&rxBuf, 1);
+			if(length == 3 && (value == '1' || value == '0'))
+			{
+				if(value == '1')
+				{
+					params[PARAM_AUTO] = 1;
+					sendString("Auto-On enabled.\r\n");
+				}
+				else
+				{
+					params[PARAM_AUTO] = 0;
+					sendString("Auto-On disabled.\r\n");
+				}
+			}
+			else
+			{
+				sendString("Error. Usage: \"a<1/0>\"\r\n");
+			}
 		}
 		else if(cb_getNext(&rxBuf) == 's')
 		{
@@ -258,13 +321,25 @@ void sendString(char *data)
 
 ISR(TIMER1_COMPA_vect) // PWM
 {
-	/*
 	pwmCycle++;
-	if(!pwmCycle && pwmDuty) // cycle finished
-		setBit(PWM, 1); // switch pin on
-	if(pwmCycle >= pwmDuty)
-		setBit(PWM,	0); // switch pin off
-	*/
+	if(pwmCycle)
+	{
+		if(pwmCycle >= params[PARAM_RED])
+			RED_OFF;
+		if(pwmCycle >= params[PARAM_GREEN])
+			GREEN_OFF;
+		if(pwmCycle >= params[PARAM_BLUE])
+			BLUE_OFF;
+	}
+	else if(params[PARAM_POWER])
+	{
+		if(params[PARAM_RED])
+			RED_ON;
+		if(params[PARAM_GREEN])
+			GREEN_ON;
+		if(params[PARAM_BLUE])
+			BLUE_ON;
+	}
 }
 
 ISR(TIMER2_COMP_vect) // clock tick
