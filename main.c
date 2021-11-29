@@ -62,8 +62,8 @@
 
 // ==================================== [defines] ==========================================
 
-#define UART_RX_SIZE 100
-#define UART_TX_SIZE 100
+#define UART_RX_SIZE 50
+#define UART_TX_SIZE 150
 
 #define NUM_PARAM 6
 #define PARAM_CHECK_EEPROM 0
@@ -101,7 +101,12 @@ void sendString(char *data); // send a string via UART
 int main(void)
 {
 	initialize();
-	loadParams();	
+	loadParams();
+
+	if(params[PARAM_AUTO])
+		params[PARAM_POWER] = 1;
+	else
+		params[PARAM_POWER] = 0;
 
 	while(1)
 	{
@@ -259,6 +264,18 @@ void handleData(void)
 				sendString("Error. Usage: \"sy\"\r\n");
 			}
 		}
+		else if(cb_getNext(&rxBuf) == 'l')
+		{
+			if(length == 3 && cb_getNextOff(&rxBuf, 1) == 'y')
+			{
+				loadParams();
+				sendString("Parameters loaded.\r\n");
+			}
+			else
+			{
+				sendString("Error. Usage: \"ly\"\r\n");
+			}
+		}
 		else
 		{
 			sendString("Unknown command!\r\n");
@@ -279,17 +296,9 @@ void loadParams(void)
 		EECR |= 1 << EERE;
 		params[i] = EEDR;
 		if(i == PARAM_CHECK_EEPROM && params[i] != CHECK_EEPROM)
-		{
 			abort = 1;
-			break;
-		}
-	}
-	if(!abort)
-	{
-		if(params[PARAM_AUTO])
-			params[PARAM_POWER] = 1;
-		else
-			params[PARAM_POWER] = 0;
+		if(abort)
+			params[i] = 0;
 	}
 	sei();
 }

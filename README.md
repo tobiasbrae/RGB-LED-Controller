@@ -14,4 +14,5 @@ g<value> - sets the green pwm value (0...255)
 b<value> - sets the blue pwm value (0...255)
 p<1/0> - switches the power on or off
 a<1/0> - switches auto-on after powerloss on or off
-s<y> - saves the current configuration
+s<y> - stores the current configuration
+l<y> - loads the stored configuration as current configuration
