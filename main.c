@@ -63,7 +63,7 @@
 // ==================================== [defines] ==========================================
 
 #define UART_RX_SIZE 50
-#define UART_TX_SIZE 150
+#define UART_TX_SIZE 100
 
 #define NUM_PARAM 6
 #define PARAM_CHECK_EEPROM 0
@@ -93,8 +93,6 @@ void initialize(void); // setting the timers, uart, etc.
 void handleData(void); // check input buffer for possible commands
 void loadParams(void); // load parameters from eeprom
 void storeParams(void); // store parameters to eeprom
-void sendChar(char data); // send a char via UART
-void sendString(char *data); // send a string via UART
 
 // ==================================== [program start] ==========================================
 
@@ -110,6 +108,12 @@ int main(void)
 
 	while(1)
 	{
+		if(clock > 5 && cb_hasNext(&txBuf))
+		{
+			UDR = cb_getNext(&txBuf);
+			cb_delete(&txBuf);
+			clock = 0;
+		}
 		handleData();
 	}
 }
@@ -183,10 +187,10 @@ void handleData(void)
 			if(sscanf(buffer, "r%u\r",&value) == 1 && value <= 255)
 			{
 				params[PARAM_RED] = (uint8_t) value;
-				sendString("Static value red changed successfully.\r\n");
+				cb_putString(&txBuf, "Static value red changed successfully.\r\n");
 			}
 			else
-				sendString("Error. Usage: \"r<0...255>\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"r<0...255>\"\r\n");
 		}
 		else if(cb_getNext(&rxBuf) == 'g')
 		{
@@ -194,10 +198,10 @@ void handleData(void)
 			if(sscanf(buffer, "g%u\r",&value) == 1 && value <= 255)
 			{
 				params[PARAM_GREEN] = (uint8_t) value;
-				sendString("Static value green changed successfully.\r\n");
+				cb_putString(&txBuf, "Static value green changed successfully.\r\n");
 			}
 			else
-				sendString("Error. Usage: \"g<0...255>\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"g<0...255>\"\r\n");
 		}
 		else if(cb_getNext(&rxBuf) == 'b')
 		{
@@ -205,10 +209,10 @@ void handleData(void)
 			if(sscanf(buffer, "b%u\r",&value) == 1 && value <= 255)
 			{
 				params[PARAM_BLUE] = (uint8_t) value;
-				sendString("Static value blue changed successfully.\r\n");
+				cb_putString(&txBuf, "Static value blue changed successfully.\r\n");
 			}
 			else
-				sendString("Error. Usage: \"b<0...255>\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"b<0...255>\"\r\n");
 		}
 		else if(cb_getNext(&rxBuf) == 'p')
 		{
@@ -218,17 +222,17 @@ void handleData(void)
 				if(value == '1')
 				{
 					params[PARAM_POWER] = 1;
-					sendString("Power enabled.\r\n");
+					cb_putString(&txBuf, "Power enabled.\r\n");
 				}
 				else
 				{
 					params[PARAM_POWER] = 0;
-					sendString("Power disabled.\r\n");
+					cb_putString(&txBuf, "Power disabled.\r\n");
 				}
 			}
 			else
 			{
-				sendString("Error. Usage: \"p<1/0>\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"p<1/0>\"\r\n");
 			}
 		}
 		else if(cb_getNext(&rxBuf) == 'a')
@@ -239,17 +243,17 @@ void handleData(void)
 				if(value == '1')
 				{
 					params[PARAM_AUTO] = 1;
-					sendString("Auto-On enabled.\r\n");
+					cb_putString(&txBuf, "Auto-On enabled.\r\n");
 				}
 				else
 				{
 					params[PARAM_AUTO] = 0;
-					sendString("Auto-On disabled.\r\n");
+					cb_putString(&txBuf, "Auto-On disabled.\r\n");
 				}
 			}
 			else
 			{
-				sendString("Error. Usage: \"a<1/0>\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"a<1/0>\"\r\n");
 			}
 		}
 		else if(cb_getNext(&rxBuf) == 's')
@@ -257,11 +261,11 @@ void handleData(void)
 			if(length == 3 && cb_getNextOff(&rxBuf, 1) == 'y')
 			{
 				storeParams();
-				sendString("Parameters stored.\r\n");
+				cb_putString(&txBuf, "Parameters stored.\r\n");
 			}
 			else
 			{
-				sendString("Error. Usage: \"sy\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"sy\"\r\n");
 			}
 		}
 		else if(cb_getNext(&rxBuf) == 'l')
@@ -269,16 +273,16 @@ void handleData(void)
 			if(length == 3 && cb_getNextOff(&rxBuf, 1) == 'y')
 			{
 				loadParams();
-				sendString("Parameters loaded.\r\n");
+				cb_putString(&txBuf, "Parameters loaded.\r\n");
 			}
 			else
 			{
-				sendString("Error. Usage: \"ly\"\r\n");
+				cb_putString(&txBuf, "Error. Usage: \"ly\"\r\n");
 			}
 		}
 		else
 		{
-			sendString("Unknown command!\r\n");
+			cb_putString(&txBuf, "Unknown command!\r\n");
 		}
 		cb_deleteN(&rxBuf, length);
 	}
@@ -319,26 +323,6 @@ void storeParams(void)
 	sei();
 }
 
-void sendChar(char data)
-{
-	cb_put(&txBuf, data);
-	if(!isSending)
-	{
-		isSending = 1;
-		UDR = data;
-	}
-}
-
-void sendString(char *data)
-{
-	cb_putString(&txBuf, data);
-	if(!isSending)
-	{
-		isSending = 1;
-		UDR = data[0];
-	}
-}
-
 ISR(TIMER1_COMPA_vect) // PWM
 {
 	pwmCycle++;
@@ -372,15 +356,11 @@ ISR(USART_RXC_vect) // UART receive complete
 	char data = UDR;
 	cb_put(&rxBuf, data);
 	if(data == '\r')
-		sendChar('\n');
-	sendChar(data);
+		cb_put(&txBuf, '\n');
+	cb_put(&txBuf, data);
 }
 
 ISR(USART_TXC_vect) // UART transmit complete
 {
-	cb_delete(&txBuf);
-	if(cb_getNext(&txBuf))
-		UDR = cb_getNext(&txBuf);
-	else
-		isSending = 0;
+	// nothing to do here
 }
